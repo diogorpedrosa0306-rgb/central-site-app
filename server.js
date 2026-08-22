@@ -8,33 +8,474 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // =========================
-// CONEXÃO COM POSTGRESQL
+// BANCO DE DADOS
 // =========================
-
-if (!process.env.DATABASE_URL) {
-  console.error("ERRO: DATABASE_URL não foi configurada no Render.");
-  process.exit(1);
-}
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  max: 10,
-  idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 10000,
-
-  // Funciona com URL externa e também evita problemas
-  // caso o Render forneça sslmode=require.
-  ssl: process.env.DATABASE_URL.includes("sslmode=require")
-    ? { rejectUnauthorized: false }
-    : false
+  ssl: {
+    rejectUnauthorized: false
+  }
 });
 
 // =========================
-// CRIAR TABELA AUTOMATICAMENTE
+// CRIAR TABELA
 // =========================
 
 async function initDatabase() {
   try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(100) NOT NULL,
+        email VARCHAR(255) UNIQUE NOT NULL,
+        password TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    console.log("Banco conectado.");
+    console.log("Tabela users pronta.");
+
+  } catch (error) {
+    console.error("ERRO NO BANCO:");
+    console.error(error);
+    process.exit(1);
+  }
+}
+
+// =========================
+// INÍCIO
+// =========================
+
+app.get("/", (req, res) => {
+  res.send(`
+    <html>
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Central Site App</title>
+
+        <style>
+          body {
+            font-family: Arial;
+            background: #f5f5f5;
+            text-align: center;
+            padding: 50px 20px;
+          }
+
+          .box {
+            background: white;
+            max-width: 500px;
+            margin: auto;
+            padding: 30px;
+            border-radius: 15px;
+          }
+
+          a {
+            display: inline-block;
+            background: #111;
+            color: white;
+            padding: 15px 25px;
+            border-radius: 8px;
+            text-decoration: none;
+          }
+        </style>
+      </head>
+
+      <body>
+
+        <div class="box">
+
+          <h1>Central Site App</h1>
+
+          <p>
+            Encontre serviços de forma simples e rápida.
+          </p>
+
+          <a href="/cadastro">
+            Criar conta
+          </a>
+
+        </div>
+
+      </body>
+    </html>
+  `);
+});
+
+// =========================
+// CADASTRO
+// =========================
+
+app.get("/cadastro", (req, res) => {
+  res.send(`
+    <html>
+      <head>
+        <meta charset="UTF-8">
+
+        <meta
+          name="viewport"
+          content="width=device-width, initial-scale=1.0"
+        >
+
+        <title>Criar conta</title>
+
+        <style>
+
+          body {
+            font-family: Arial;
+            background: #f5f5f5;
+            padding: 30px 20px;
+          }
+
+          .box {
+            background: white;
+            max-width: 420px;
+            margin: auto;
+            padding: 30px;
+            border-radius: 15px;
+          }
+
+          input {
+            width: 100%;
+            padding: 14px;
+            margin: 8px 0 18px;
+            box-sizing: border-box;
+            border: 1px solid #ccc;
+            border-radius: 8px;
+            font-size: 16px;
+          }
+
+          button {
+            width: 100%;
+            padding: 14px;
+            background: #111;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+          }
+
+          label {
+            font-weight: bold;
+          }
+
+        </style>
+
+      </head>
+
+      <body>
+
+        <div class="box">
+
+          <h1>Criar conta</h1>
+
+          <form
+            action="/api/cadastro"
+            method="POST"
+          >
+
+            <label>Nome</label>
+
+            <input
+              type="text"
+              name="name"
+              placeholder="Seu nome"
+              required
+            >
+
+            <label>E-mail</label>
+
+            <input
+              type="email"
+              name="email"
+              placeholder="seu@email.com"
+              required
+            >
+
+            <label>Senha</label>
+
+            <input
+              type="password"
+              name="password"
+              placeholder="Mínimo 6 caracteres"
+              minlength="6"
+              required
+            >
+
+            <button type="submit">
+              Criar conta
+            </button>
+
+          </form>
+
+          <br>
+
+          <a href="/">
+            Voltar
+          </a>
+
+        </div>
+
+      </body>
+    </html>
+  `);
+});
+
+// =========================
+// TESTE DO BANCO
+// =========================
+
+app.get("/api/health", async (req, res) => {
+
+  try {
+
+    const result = await pool.query(
+      "SELECT NOW()"
+    );
+
+    res.json({
+      status: "ok",
+      database: "connected",
+      time: result.rows[0].now
+    });
+
+  } catch (error) {
+
+    console.error(error);
+
+    res.status(500).json({
+      status: "error",
+      database: "disconnected",
+      error: error.message
+    });
+
+  }
+
+});
+
+// =========================
+// CADASTRO DO USUÁRIO
+// =========================
+
+app.post("/api/cadastro", async (req, res) => {
+
+  try {
+
+    const {
+      name,
+      email,
+      password
+    } = req.body;
+
+    if (!name || !email || !password) {
+
+      return res.status(400).send(`
+        <h2>Preencha todos os campos.</h2>
+        <a href="/cadastro">Voltar</a>
+      `);
+
+    }
+
+    if (password.length < 6) {
+
+      return res.status(400).send(`
+        <h2>A senha precisa ter pelo menos 6 caracteres.</h2>
+        <a href="/cadastro">Voltar</a>
+      `);
+
+    }
+
+    const cleanName = name.trim();
+
+    const normalizedEmail =
+      email.trim().toLowerCase();
+
+    const existingUser = await pool.query(
+      "SELECT id FROM users WHERE email = $1",
+      [normalizedEmail]
+    );
+
+    if (existingUser.rows.length > 0) {
+
+      return res.status(409).send(`
+        <h2>Este e-mail já está cadastrado.</h2>
+        <a href="/cadastro">Voltar</a>
+      `);
+
+    }
+
+    const salt =
+      crypto.randomBytes(16).toString("hex");
+
+    const hashedPassword =
+      await new Promise((resolve, reject) => {
+
+        crypto.scrypt(
+          password,
+          salt,
+          64,
+          (error, derivedKey) => {
+
+            if (error) {
+
+              reject(error);
+
+              return;
+            }
+
+            resolve(
+              salt + ":" +
+              derivedKey.toString("hex")
+            );
+
+          }
+        );
+
+      });
+
+    const result = await pool.query(
+      `
+      INSERT INTO users
+      (name, email, password)
+
+      VALUES
+      ($1, $2, $3)
+
+      RETURNING
+      id,
+      name,
+      email,
+      created_at
+      `,
+      [
+        cleanName,
+        normalizedEmail,
+        hashedPassword
+      ]
+    );
+
+    console.log(
+      "Usuário cadastrado:",
+      result.rows[0].email
+    );
+
+    res.send(`
+      <html>
+
+        <head>
+
+          <meta charset="UTF-8">
+
+          <meta
+            name="viewport"
+            content="width=device-width, initial-scale=1.0"
+          >
+
+          <title>Cadastro realizado</title>
+
+          <style>
+
+            body {
+              font-family: Arial;
+              text-align: center;
+              background: #f5f5f5;
+              padding: 50px 20px;
+            }
+
+            .box {
+              background: white;
+              max-width: 450px;
+              margin: auto;
+              padding: 40px 25px;
+              border-radius: 15px;
+            }
+
+            a {
+              display: inline-block;
+              background: #111;
+              color: white;
+              padding: 14px 25px;
+              border-radius: 8px;
+              text-decoration: none;
+            }
+
+          </style>
+
+        </head>
+
+        <body>
+
+          <div class="box">
+
+            <h1>Cadastro realizado! 🎉</h1>
+
+            <p>
+              Bem-vindo, ${cleanName}!
+            </p>
+
+            <a href="/">
+              Ir para o início
+            </a>
+
+          </div>
+
+        </body>
+
+      </html>
+    `);
+
+  } catch (error) {
+
+    console.error(
+      "ERRO NO CADASTRO:"
+    );
+
+    console.error(error);
+
+    res.status(500).send(`
+      <h2>Erro ao cadastrar usuário.</h2>
+
+      <p>
+        O servidor encontrou um erro.
+      </p>
+
+      <a href="/cadastro">
+        Tentar novamente
+      </a>
+    `);
+
+  }
+
+});
+
+// =========================
+// INICIAR SERVIDOR
+// =========================
+
+const PORT =
+  process.env.PORT || 3000;
+
+async function start() {
+
+  await initDatabase();
+
+  app.listen(
+    PORT,
+    "0.0.0.0",
+    () => {
+
+      console.log(
+        "Servidor rodando na porta " + PORT
+      );
+
+    }
+  );
+
+}
+
+start();  try {
     await pool.query(`
       CREATE TABLE IF NOT EXISTS users (
         id SERIAL PRIMARY KEY,
